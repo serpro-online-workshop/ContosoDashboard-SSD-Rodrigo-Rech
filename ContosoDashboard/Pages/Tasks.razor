@@ -5,6 +5,7 @@
 @using System.Security.Claims
 @attribute [Authorize]
 @inject ITaskService TaskService
+@inject IDocumentService DocumentService
 @inject AuthenticationStateProvider AuthenticationStateProvider
 
 <PageTitle>My Tasks - ContosoDashboard</PageTitle>
@@ -18,6 +19,57 @@
             <button class="btn btn-primary" @onclick="ShowCreateTaskModal">
                 <i class="bi bi-plus-circle"></i> New Task
             </button>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-body">
+            <h2 class="h5">Attach a document to a task</h2>
+            <div class="row g-3 align-items-end">
+                <div class="col-md-3">
+                    <label class="form-label" for="task-document-task">Task</label>
+                    <select id="task-document-task" class="form-select" @bind="taskUploadId">
+                        <option value="">Select a task</option>
+                        @if (tasks != null)
+                        {
+                            @foreach (var task in tasks)
+                            {
+                                <option value="@task.TaskId">@task.Title</option>
+                            }
+                        }
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label" for="task-document-title">Title</label>
+                    <input id="task-document-title" class="form-control" @bind="taskUploadTitle" maxlength="255" placeholder="Defaults to the file name" />
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label" for="task-document-category">Category</label>
+                    <select id="task-document-category" class="form-select" @bind="taskUploadCategory">
+                        @foreach (var category in DocumentCategories.All)
+                        {
+                            <option value="@category">@category</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label" for="task-document-file">File</label>
+                    <InputFile id="task-document-file" OnChange="SelectTaskFile" />
+                </div>
+                <div class="col-md-2">
+                    <button class="btn btn-primary w-100" @onclick="UploadTaskDocument" disabled="@(taskUploadId == null || taskUploadFile == null || isTaskUploading)">
+                        @if (isTaskUploading)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+                        }
+                        Upload
+                    </button>
+                </div>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(taskUploadMessage))
+            {
+                <div class="alert alert-info mt-3 mb-0">@taskUploadMessage</div>
+            }
         </div>
     </div>
 
@@ -70,6 +122,7 @@
                         <th>Status</th>
                         <th>Due Date</th>
                         <th>Project</th>
+                        <th>Documents</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -123,6 +176,19 @@
                                 }
                             </td>
                             <td>
+                                @if (taskDocuments.TryGetValue(task.TaskId, out var documents) && documents.Count > 0)
+                                {
+                                    @foreach (var document in documents)
+                                    {
+                                        <a class="d-block small" href="/documents/@document.DocumentId/download">@document.Title</a>
+                                    }
+                                }
+                                else
+                                {
+                                    <span class="text-muted">None</span>
+                                }
+                            </td>
+                            <td>
                                 <button class="btn btn-sm btn-outline-primary" @onclick="() => ViewTaskDetails(task.TaskId)">
                                     <i class="bi bi-eye"></i>
                                 </button>
@@ -139,6 +205,13 @@
     private List<TaskItem>? tasks;
     private string filterStatus = "";
     private string filterPriority = "";
+    private Dictionary<int, List<DocumentSummary>> taskDocuments = new();
+    private int? taskUploadId;
+    private IBrowserFile? taskUploadFile;
+    private string taskUploadTitle = string.Empty;
+    private string taskUploadCategory = DocumentCategories.ProjectDocuments;
+    private string taskUploadMessage = string.Empty;
+    private bool isTaskUploading;
     private int currentUserId = 0;
 
     protected override async Task OnInitializedAsync()
@@ -161,6 +234,7 @@
     private async Task LoadTasks()
     {
         tasks = await TaskService.GetUserTasksAsync(currentUserId);
+        await LoadTaskDocuments();
     }
 
     private async Task ApplyFilters()
@@ -169,6 +243,82 @@
         TaskPriority? priority = string.IsNullOrEmpty(filterPriority) ? null : Enum.Parse<TaskPriority>(filterPriority);
 
         tasks = await TaskService.GetFilteredTasksAsync(currentUserId, status, priority, null);
+        await LoadTaskDocuments();
+    }
+
+    private async Task LoadTaskDocuments()
+    {
+        taskDocuments = new Dictionary<int, List<DocumentSummary>>();
+        if (tasks == null)
+        {
+            return;
+        }
+
+        foreach (var task in tasks)
+        {
+            var page = await DocumentService.ListVisibleAsync(currentUserId, new DocumentQueryOptions
+            {
+                TaskId = task.TaskId,
+                PageNumber = 1,
+                PageSize = 10,
+                SortBy = DocumentSortField.UploadedAt,
+                Descending = true
+            });
+            taskDocuments[task.TaskId] = page.Items.ToList();
+        }
+    }
+
+    private void SelectTaskFile(InputFileChangeEventArgs args)
+    {
+        taskUploadFile = args.FileCount == 0 ? null : args.File;
+    }
+
+    private async Task UploadTaskDocument()
+    {
+        var task = tasks?.SingleOrDefault(item => item.TaskId == taskUploadId);
+        if (task == null || taskUploadFile == null)
+        {
+            taskUploadMessage = "Select a task and file before uploading.";
+            return;
+        }
+
+        var file = taskUploadFile;
+        isTaskUploading = true;
+        taskUploadMessage = string.Empty;
+        try
+        {
+            var result = (await DocumentService.UploadAsync(currentUserId, new DocumentUploadRequest
+            {
+                SharedMetadata = new DocumentMetadataInput
+                {
+                    Title = string.IsNullOrWhiteSpace(taskUploadTitle) ? Path.GetFileNameWithoutExtension(file.Name) : taskUploadTitle,
+                    Category = taskUploadCategory,
+                    ProjectId = task.ProjectId,
+                    TaskId = task.TaskId
+                },
+                Files = new[]
+                {
+                    new DocumentUploadItem
+                    {
+                        OriginalFileName = file.Name,
+                        ContentType = file.ContentType,
+                        Length = file.Size,
+                        OpenReadAsync = cancellationToken => Task.FromResult<Stream>(file.OpenReadStream(DocumentStorageLimits.MaxFileSizeBytes, cancellationToken))
+                    }
+                }
+            })).Single();
+            taskUploadMessage = result.Message;
+            if (result.Succeeded)
+            {
+                taskUploadFile = null;
+                taskUploadTitle = string.Empty;
+                await LoadTaskDocuments();
+            }
+        }
+        finally
+        {
+            isTaskUploading = false;
+        }
     }
 
     private async Task UpdateTaskStatus(int taskId, Models.TaskStatus newStatus)

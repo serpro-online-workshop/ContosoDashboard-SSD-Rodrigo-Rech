@@ -44,10 +44,13 @@ malformed input, or unavailable scanner dependency.
 
 ## Allowed Types and Limits
 
-The first implementation supports PDF, JPEG, PNG, DOCX, XLSX, and PPTX. The service
-validates both the extension and declared/observed content type; the original name is not
-trusted for execution. Maximum size is 25 MiB (26,214,400 bytes). The scanner may reject
-mismatched signatures, unsafe test markers, or malformed supported files.
+The first implementation supports PDF, Microsoft Word (`.doc` and `.docx`), Excel
+(`.xls` and `.xlsx`), PowerPoint (`.ppt` and `.pptx`), plain text (`.txt`), JPEG, and
+PNG. The service validates both the extension and declared/observed content type; the
+original name is not trusted for execution. Maximum size is 25 MiB (26,214,400 bytes).
+The scanner may reject mismatched signatures, unsafe test markers, or malformed supported
+files. This deterministic local scanner is a training/offline safety boundary, not a
+replacement for production antivirus or content inspection.
 
 ## Failure and Cleanup Invariants
 

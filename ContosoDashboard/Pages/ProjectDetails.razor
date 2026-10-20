@@ -5,6 +5,7 @@
 @using System.Security.Claims
 @attribute [Authorize]
 @inject IProjectService ProjectService
+@inject IDocumentService DocumentService
 @inject NavigationManager NavigationManager
 @inject AuthenticationStateProvider AuthenticationStateProvider
 
@@ -151,6 +152,90 @@
                         }
                     </div>
                 </div>
+
+                <div class="card mt-4">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Project Documents</h5>
+                        <a class="btn btn-sm btn-outline-secondary" href="/documents">Document workspace</a>
+                    </div>
+                    <div class="card-body">
+                        @if (projectDocuments == null)
+                        {
+                            <p><em>Loading documents...</em></p>
+                        }
+                        else if (projectDocuments.Count == 0)
+                        {
+                            <p class="text-muted">No documents are associated with this project.</p>
+                        }
+                        else
+                        {
+                            <div class="list-group list-group-flush mb-4">
+                                @foreach (var document in projectDocuments)
+                                {
+                                    <div class="list-group-item px-0 d-flex justify-content-between align-items-center">
+                                        <div>
+                                            <strong>@document.Title</strong>
+                                            <small class="text-muted d-block">@document.Category · @document.OriginalFileName</small>
+                                        </div>
+                                        <span>
+                                            @if (DocumentFileTypes.IsPreviewable(document.FileType))
+                                            {
+                                                <a class="btn btn-sm btn-outline-primary me-1" href="/documents/@document.DocumentId/preview" target="_blank" rel="noopener">Preview</a>
+                                            }
+                                            <a class="btn btn-sm btn-outline-secondary" href="/documents/@document.DocumentId/download">Download</a>
+                                        </span>
+                                    </div>
+                                }
+                            </div>
+                        }
+
+                        <h6>Upload to this project</h6>
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label" for="project-document-title">Title</label>
+                                <input id="project-document-title" class="form-control" @bind="projectDocumentTitle" maxlength="255" placeholder="Defaults to the file name" />
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label" for="project-document-category">Category</label>
+                                <select id="project-document-category" class="form-select" @bind="projectDocumentCategory">
+                                    @foreach (var category in DocumentCategories.All)
+                                    {
+                                        <option value="@category">@category</option>
+                                    }
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label" for="project-document-task">Task association</label>
+                                <select id="project-document-task" class="form-select" @bind="selectedTaskId">
+                                    <option value="">Project-level document</option>
+                                    @foreach (var task in project.Tasks.OrderBy(task => task.Title))
+                                    {
+                                        <option value="@task.TaskId">@task.Title</option>
+                                    }
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label" for="project-document-files">Files</label>
+                                <InputFile id="project-document-files" OnChange="SelectProjectFiles" multiple />
+                            </div>
+                            <div class="col-12">
+                                <button class="btn btn-primary" @onclick="UploadProjectFiles" disabled="@(projectFiles.Count == 0 || isProjectUploading)">
+                                    @if (isProjectUploading)
+                                    {
+                                        <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+                                    }
+                                    Upload project documents
+                                </button>
+                            </div>
+                        </div>
+                        @foreach (var result in projectUploadResults)
+                        {
+                            <div class="alert @(result.Succeeded ? "alert-success" : "alert-danger") mt-2 mb-0">
+                                <strong>@result.OriginalFileName:</strong> @result.Message
+                            </div>
+                        }
+                    </div>
+                </div>
             </div>
 
             <div class="col-md-4">
@@ -237,6 +322,13 @@
     public int ProjectId { get; set; }
 
     private Project? project;
+    private List<DocumentSummary>? projectDocuments;
+    private List<IBrowserFile> projectFiles = new();
+    private List<DocumentUploadResult> projectUploadResults = new();
+    private string projectDocumentTitle = string.Empty;
+    private string projectDocumentCategory = DocumentCategories.ProjectDocuments;
+    private int? selectedTaskId;
+    private bool isProjectUploading;
     private int currentUserId = 0;
 
     protected override async Task OnInitializedAsync()
@@ -253,11 +345,73 @@
         if (currentUserId > 0)
         {
             project = await ProjectService.GetProjectByIdAsync(ProjectId, currentUserId);
+            if (project != null)
+            {
+                await LoadProjectDocuments();
+            }
         }
         
         if (project == null)
         {
             NavigationManager.NavigateTo("/projects");
+        }
+    }
+
+    private async Task LoadProjectDocuments()
+    {
+        var page = await DocumentService.ListVisibleAsync(currentUserId, new DocumentQueryOptions
+        {
+            ProjectId = ProjectId,
+            PageNumber = 1,
+            PageSize = 100,
+            SortBy = DocumentSortField.UploadedAt,
+            Descending = true
+        });
+        projectDocuments = page.Items.ToList();
+    }
+
+    private void SelectProjectFiles(InputFileChangeEventArgs args)
+    {
+        projectFiles = args.GetMultipleFiles(20).ToList();
+        projectUploadResults.Clear();
+    }
+
+    private async Task UploadProjectFiles()
+    {
+        if (projectFiles.Count == 0)
+        {
+            return;
+        }
+
+        isProjectUploading = true;
+        try
+        {
+            projectUploadResults = (await DocumentService.UploadAsync(currentUserId, new DocumentUploadRequest
+            {
+                SharedMetadata = new DocumentMetadataInput
+                {
+                    Title = projectDocumentTitle,
+                    Category = projectDocumentCategory,
+                    ProjectId = ProjectId,
+                    TaskId = selectedTaskId
+                },
+                Files = projectFiles.Select(file => new DocumentUploadItem
+                {
+                    OriginalFileName = file.Name,
+                    ContentType = file.ContentType,
+                    Length = file.Size,
+                    MetadataOverride = string.IsNullOrWhiteSpace(projectDocumentTitle)
+                        ? new DocumentMetadataInput { Title = Path.GetFileNameWithoutExtension(file.Name) }
+                        : null,
+                    OpenReadAsync = cancellationToken => Task.FromResult<Stream>(file.OpenReadStream(DocumentStorageLimits.MaxFileSizeBytes, cancellationToken))
+                }).ToList()
+            })).ToList();
+            projectFiles.Clear();
+            await LoadProjectDocuments();
+        }
+        finally
+        {
+            isProjectUploading = false;
         }
     }
 

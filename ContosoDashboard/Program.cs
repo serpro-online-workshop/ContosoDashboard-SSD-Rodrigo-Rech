@@ -1,8 +1,10 @@
 using Microsoft.EntityFrameworkCore;
 using ContosoDashboard.Data;
+using ContosoDashboard.Models;
 using ContosoDashboard.Services;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Components.Authorization;
+using System.Security.Claims;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -43,6 +45,9 @@ builder.Services.AddScoped<ITaskService, TaskService>();
 builder.Services.AddScoped<IProjectService, ProjectService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<IDashboardService, DashboardService>();
+builder.Services.AddScoped<IDocumentService, DocumentService>();
+builder.Services.AddScoped<IFileStorageService, LocalFileStorageService>();
+builder.Services.AddScoped<IFileSafetyScanner, DeterministicLocalFileSafetyScanner>();
 
 // Add HttpContextAccessor for accessing user claims
 builder.Services.AddHttpContextAccessor();
@@ -57,6 +62,7 @@ using (var scope = app.Services.CreateScope())
     {
         var context = services.GetRequiredService<ApplicationDbContext>();
         context.Database.EnsureCreated(); // For development - use migrations in production
+        DocumentSchemaInitializer.EnsureCreated(context);
     }
     catch (Exception ex)
     {
@@ -105,7 +111,72 @@ app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
 
+app.MapGet("/documents/{documentId:int}/download", async (
+    int documentId,
+    HttpContext httpContext,
+    IDocumentService documentService,
+    CancellationToken cancellationToken) =>
+{
+    if (!TryGetAuthenticatedUserId(httpContext.User, out var userId))
+    {
+        return Results.NotFound();
+    }
+
+    var access = await documentService.OpenFileAsync(userId, documentId, preview: false, cancellationToken);
+    if (access == null)
+    {
+        return Results.NotFound();
+    }
+
+    httpContext.Response.Headers.CacheControl = "no-store, no-cache";
+    httpContext.Response.Headers.Pragma = "no-cache";
+    httpContext.Response.Headers.ContentDisposition = $"attachment; filename=\"{access.FileName.Replace("\"", "") }\"";
+    return Results.File(access.Content, access.ContentType);
+}).RequireAuthorization();
+
+app.MapGet("/documents/{documentId:int}/preview", async (
+    int documentId,
+    HttpContext httpContext,
+    IDocumentService documentService,
+    CancellationToken cancellationToken) =>
+{
+    if (!TryGetAuthenticatedUserId(httpContext.User, out var userId))
+    {
+        return Results.NotFound();
+    }
+
+    var summary = await documentService.GetVisibleAsync(userId, documentId, cancellationToken);
+    if (summary == null)
+    {
+        return Results.NotFound();
+    }
+
+    if (!DocumentFileTypes.IsPreviewable(summary.FileType))
+    {
+        return Results.StatusCode(StatusCodes.Status415UnsupportedMediaType);
+    }
+
+    var access = await documentService.OpenFileAsync(userId, documentId, preview: true, cancellationToken);
+    if (access == null)
+    {
+        return Results.NotFound();
+    }
+
+    httpContext.Response.Headers.CacheControl = "no-store, no-cache";
+    httpContext.Response.Headers.Pragma = "no-cache";
+    httpContext.Response.Headers.ContentDisposition = $"inline; filename=\"{access.FileName.Replace("\"", "") }\"";
+    return Results.File(access.Content, access.ContentType);
+}).RequireAuthorization();
+
 app.MapBlazorHub();
 app.MapFallbackToPage("/_Host");
+
+static bool TryGetAuthenticatedUserId(ClaimsPrincipal principal, out int userId)
+{
+    userId = 0;
+    return principal.Identity?.IsAuthenticated == true
+        && int.TryParse(principal.FindFirstValue(ClaimTypes.NameIdentifier), out userId)
+        && userId > 0;
+}
 
 app.Run();

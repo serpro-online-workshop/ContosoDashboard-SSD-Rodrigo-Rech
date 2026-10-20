@@ -67,11 +67,11 @@ Use temporary test roots and a temporary SQLite database for every test collecti
 
 | Scenario | Expected outcome |
 |---|---|
-| Upload each supported type: PDF, JPEG, PNG, DOCX, XLSX, PPTX | Each safe file becomes available with generated private storage identity and metadata. |
+| Upload each supported type: PDF, Microsoft Word, Excel, PowerPoint, plain text, JPEG, PNG | Each safe file becomes available with generated private storage identity and metadata. |
 | Upload multiple files with shared metadata and one per-file override | One result is returned per file; the override affects only its file. |
 | Upload over 25 MiB or an unsupported type | File is rejected before availability; no accessible document or retained candidate exists. |
 | Scanner returns `Unsafe` | File is rejected and candidate cleanup runs. |
-| Scanner throws or returns `Indeterminate` | Operation fails closed; no document is available and the candidate is removed. |
+| Scanner throws or returns `Indeterminate` | Operation fails closed; no document is available and the candidate is removed. The deterministic local scanner is for offline training validation and is not production antivirus. |
 | Replace an available file with an invalid or unsafe candidate | Original metadata and bytes remain available and unchanged. |
 | Replace an available file successfully | New file is available, old private file is removed after commit, and a replacement activity is recorded. |
 | Search title, description, tag, uploader, and project | Only authorized available documents are returned; results are bounded and include expected metadata. |

@@ -27,6 +27,28 @@
         </div>
 
         <div class="nav-item px-3">
+            <NavLink class="nav-link" href="documents">
+                <span class="bi bi-file-earmark-text" aria-hidden="true"></span> Documents
+            </NavLink>
+        </div>
+
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="documents/shared">
+                <span class="bi bi-share" aria-hidden="true"></span> Shared with Me
+            </NavLink>
+        </div>
+
+        <AuthorizeView Roles="Administrator">
+            <Authorized>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="documents/reports">
+                        <span class="bi bi-bar-chart" aria-hidden="true"></span> Document Reports
+                    </NavLink>
+                </div>
+            </Authorized>
+        </AuthorizeView>
+
+        <div class="nav-item px-3">
             <NavLink class="nav-link" href="team">
                 <span class="bi bi-people" aria-hidden="true"></span> Team
             </NavLink>

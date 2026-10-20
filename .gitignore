@@ -193,6 +193,13 @@ PublishScripts/
 !**/[Pp]ackages/build/
 # Uncomment if necessary however generally it will be regenerated when needed
 #!**/[Pp]ackages/repositories.config
+
+# Local SQLite and private document storage
+*.db
+*.db-shm
+*.db-wal
+AppData/uploads/
+**/AppData/uploads/
 # NuGet v3's project.json files produces more ignorable files
 *.nuget.props
 *.nuget.targets

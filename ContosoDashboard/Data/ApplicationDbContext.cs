@@ -17,6 +17,10 @@ public class ApplicationDbContext : DbContext
     public DbSet<Notification> Notifications { get; set; } = null!;
     public DbSet<ProjectMember> ProjectMembers { get; set; } = null!;
     public DbSet<Announcement> Announcements { get; set; } = null!;
+    public DbSet<Document> Documents { get; set; } = null!;
+    public DbSet<DocumentTag> DocumentTags { get; set; } = null!;
+    public DbSet<DocumentShare> DocumentShares { get; set; } = null!;
+    public DbSet<DocumentActivity> DocumentActivities { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -63,6 +67,97 @@ public class ApplicationDbContext : DbContext
         modelBuilder.Entity<User>()
             .HasIndex(u => u.Email)
             .IsUnique();
+
+        modelBuilder.Entity<Document>()
+            .HasOne(d => d.Uploader)
+            .WithMany()
+            .HasForeignKey(d => d.UploaderId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<Document>()
+            .HasOne(d => d.Project)
+            .WithMany()
+            .HasForeignKey(d => d.ProjectId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<Document>()
+            .HasOne(d => d.Task)
+            .WithMany()
+            .HasForeignKey(d => d.TaskId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<Document>()
+            .HasIndex(d => new { d.UploaderId, d.UploadedAtUtc });
+
+        modelBuilder.Entity<Document>()
+            .HasIndex(d => new { d.ProjectId, d.UploadedAtUtc });
+
+        modelBuilder.Entity<Document>()
+            .HasIndex(d => d.TaskId);
+
+        modelBuilder.Entity<Document>()
+            .HasIndex(d => new { d.IsAvailable, d.UploadedAtUtc });
+
+        modelBuilder.Entity<Document>()
+            .HasIndex(d => d.FilePath)
+            .IsUnique();
+
+        modelBuilder.Entity<DocumentTag>()
+            .HasOne(t => t.Document)
+            .WithMany(d => d.Tags)
+            .HasForeignKey(t => t.DocumentId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<DocumentTag>()
+            .HasIndex(t => new { t.DocumentId, t.NormalizedTagText })
+            .IsUnique();
+
+        modelBuilder.Entity<DocumentTag>()
+            .HasIndex(t => new { t.NormalizedTagText, t.DocumentId });
+
+        modelBuilder.Entity<DocumentShare>()
+            .HasOne(s => s.Document)
+            .WithMany(d => d.Shares)
+            .HasForeignKey(s => s.DocumentId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<DocumentShare>()
+            .HasOne(s => s.TargetUser)
+            .WithMany()
+            .HasForeignKey(s => s.TargetUserId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<DocumentShare>()
+            .HasOne(s => s.GrantedByUser)
+            .WithMany()
+            .HasForeignKey(s => s.GrantedByUserId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<DocumentShare>()
+            .ToTable(table => table.HasCheckConstraint(
+                "CK_DocumentShare_ExactlyOneTarget",
+                "(TargetUserId IS NOT NULL AND TargetDepartment IS NULL) OR (TargetUserId IS NULL AND TargetDepartment IS NOT NULL)"));
+
+        modelBuilder.Entity<DocumentShare>()
+            .HasIndex(s => new { s.TargetUserId, s.RevokedAtUtc });
+
+        modelBuilder.Entity<DocumentShare>()
+            .HasIndex(s => new { s.TargetDepartment, s.RevokedAtUtc });
+
+        modelBuilder.Entity<DocumentActivity>()
+            .HasOne(a => a.Document)
+            .WithMany(d => d.Activities)
+            .HasForeignKey(a => a.DocumentId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        modelBuilder.Entity<DocumentActivity>()
+            .HasOne(a => a.ActorUser)
+            .WithMany()
+            .HasForeignKey(a => a.ActorUserId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<DocumentActivity>()
+            .HasIndex(a => new { a.OccurredAtUtc, a.ActionType });
 
         // Seed initial data
         SeedData(modelBuilder);
